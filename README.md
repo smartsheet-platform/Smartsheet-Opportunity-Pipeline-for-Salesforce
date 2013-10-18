@@ -10,3 +10,5 @@ If you have any questions or suggestions about this document or about the Smarts
 
 The Smartsheet Platform team
 
+
+[![githalytics.com alpha](https://cruel-carlota.pagodabox.com/2767edac14b600e7d2463c462d047d5e "githalytics.com")](http://githalytics.com/smartsheet-platform/Smartsheet-Opportunity-Pipeline-for-Salesforce)
