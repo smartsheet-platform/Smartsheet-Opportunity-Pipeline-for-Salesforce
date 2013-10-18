@@ -1,0 +1,93 @@
+<apex:component allowDML="true" controller="SmartsheetImportCon">
+   
+   <!-- 
+        Include this component to pull all the Sheets from Smartsheet, 
+        
+        Usage example - 
+        <c:SmartsheetImport objectname="Opportunity"/> 
+        objectname - Name of the Salesforce Object - Required.
+   
+        Dependancies - 
+        
+        jQuery Library as static Resource
+        Chosen Library as static Resource, used to search through the sheets. 
+
+****************************************************************************
+    Copyright 2013 Smartsheet, Inc.
+    
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+    
+    http://www.apache.org/licenses/LICENSE-2.0
+    
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and       
+    limitations under the License.             
+*****************************************************************************    
+    -->
+    
+   <link href="{!URLFOR($Resource.Chosen, 'CMC_UI/css/chosen.css')}" rel="stylesheet"/>
+   
+   <script src="{!URLFOR($Resource.kvisw_jQueryUI, '/js/jquery-1.8.2.min.js')}"/>   
+   <script src="{!URLFOR($Resource.Chosen, 'CMC_UI/js/plugins/chosen/chosen.jquery.js')}"/>
+        
+    
+    <script>
+        
+        $j = $.noConflict();
+         
+        $j(document).ready(function() {
+            $j(".sheetsSelect").chosen({
+              no_results_text: "No results matched",
+              create_option: false
+            });
+         });
+    
+    </script>
+        
+    <apex:attribute name="objectname" type="String" assignTo="{!objectName}" description="Name of the Object" required="true"/>
+    <apex:pageMessages id="cmpMessages"/>
+    <apex:outputPanel id="comparePanel">
+        <apex:pageBlock id="compareBlk" rendered="{!isConflictPresent}">
+            <apex:pageBlockTable value="{!mergeSObjects}" var="m">
+                <apex:column headerValue="Name">
+                    <apex:outputLink value="/{!m.salesforceRec.Id}" target="_blank">{!m.salesforceRec['Name']}</apex:outputLink>
+                </apex:column>
+                <apex:column headerValue="Merge Option">
+                    <apex:selectList value="{!m.selected}" multiselect="false" size="1">
+                        <apex:selectOptions value="{!mergeOptions}"/>
+                    </apex:selectList>
+                </apex:column>
+            </apex:pageBlockTable>
+        </apex:pageBlock>
+    </apex:outputPanel>
+    <apex:pageBlock id="importBlock">
+            <apex:pageBlockButtons >
+                    <apex:commandButton value="Import to {!objectName}" action="{!performImport}" rerender="cmpMessages,comparePanel" disabled="{!mapData = null || mapData.size = 0}"/>
+            </apex:pageBlockButtons>
+            <apex:pageBlockSection >
+                <apex:pageBlockSectionItem >
+                    <apex:outputLabel value="Select Sheet:"/>
+                    <apex:selectList value="{!sheetid}" multiselect="false" size="1" styleclass="sheetsSelect">
+                        <apex:selectOptions value="{!sheets}"/>
+                        <apex:actionSupport event="onchange" action="{!getSheetFields}" rerender="importBlock"/>
+                    </apex:selectList>
+                </apex:pageBlockSectionItem>
+            </apex:pageBlockSection>        
+            <apex:pageBlockSection columns="1" id="theMapper" rendered="{!mapData != null && mapData.size > 0}">
+                <apex:pageBlockTable value="{!mapData}" var="m">
+                        <apex:column headerValue="Smartsheet Column">
+                            <apex:outputText value="{!m.columnName}"/>
+                        </apex:column>
+                        <apex:column headerValue="{!objectName} Column">
+                            <apex:selectList value="{!m.oFieldName}" multiselect="false" size="1">
+                                <apex:selectOptions value="{!oFields}"/>                                
+                            </apex:selectList>
+                        </apex:column>  
+                    </apex:pageBlockTable>
+            </apex:pageBlockSection>        
+    </apex:pageBlock>
+</apex:component>

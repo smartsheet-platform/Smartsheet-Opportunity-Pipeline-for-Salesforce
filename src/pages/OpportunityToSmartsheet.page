@@ -1,0 +1,131 @@
+<!-- 
+****************************************************************************
+    Copyright 2013 Smartsheet, Inc.
+    
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+    
+    http://www.apache.org/licenses/LICENSE-2.0
+    
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and       
+    limitations under the License.             
+*****************************************************************************
+ -->
+<apex:page standardController="Opportunity" recordSetVar="opportunities" extensions="OpportunityToSmartsheet" title="Smartsheet Opportunity Pipeline Import/Export">
+    <script>
+          function setFocusOnLoad() {}  
+    </script>
+    <apex:sectionHeader id="reportHeader" title="Opportunity Pipeline Report" subtitle="Smartsheet Import/Export" />
+    <apex:form id="theform">
+        <apex:outputPanel id="statusPanel">
+            <apex:actionStatus id="status">
+                <apex:facet name="start">
+                  <span style="color:red;">Processing</span> <img src="/img/loading.gif" />
+                </apex:facet>
+            </apex:actionStatus>
+        </apex:outputPanel>
+        <apex:pageMessages id="theMessages" escape="false" />
+        <apex:pageBlock id="selectionBlock">
+            <!-- 
+                Import/Export Selector
+             -->
+            <apex:selectList value="{!selectedOption}" multiselect="false" size="1">
+                <apex:selectOptions value="{!allOptions}"/>
+                <apex:actionSupport event="onchange" action="{!importExport}" rerender="importPanel,exportPanel,selectionBlock,theform"/>
+            </apex:selectList>
+        </apex:pageBlock>
+        <apex:outputPanel id="exportPanel">
+            <apex:outputPanel rendered="{!isExportSelected}">
+                <apex:pageBlock id="reportBlock" title="1. Run Report to get Opportunities">
+                <!-- 
+                    Export Report Filters
+                 -->
+                    <apex:pageBlockSection >
+                        <apex:pageBlockSectionItem >
+                            <apex:outputLabel value="Stage:"/>
+                            <apex:selectList value="{!selectedStage}" multiselect="false" size="1">
+                                <apex:selectOptions value="{!allStages}"/>              
+                            </apex:selectList>
+                        </apex:pageBlockSectionItem>
+                        <apex:pageBlockSectionItem >
+                            <apex:outputLabel value="Probability:"/>
+                            <apex:selectList value="{!selectedProb}" multiselect="false" size="1">
+                                <apex:selectOptions value="{!allProbabilities}"/>               
+                            </apex:selectList>
+                        </apex:pageBlockSectionItem>
+                        <!-- 
+                            Date Range Selectors
+                         -->
+                        <apex:pageBlockSectionItem helpText="Leave field blank for 'All'">
+                            <apex:outputLabel value="From Close Date:"/>
+                            <apex:inputField value="{!opp1.CloseDate}" required="false" />                   
+                        </apex:pageBlockSectionItem>
+                        <apex:pageBlockSectionItem helpText="Leave field blank for 'All'" >
+                            <apex:outputLabel value="To Close Date:"/>
+                            <apex:inputField value="{!opp2.CloseDate}" required="false" />                   
+                        </apex:pageBlockSectionItem>
+                    </apex:pageBlockSection>
+                    <div align="center">    
+                        <apex:commandButton value="Get Opportunities" action="{!report}" rerender="oppReportSection,theMessages,statusPanel,exportBtn,nameBlock,reportBlock,exportBlock,exportPanel" status="status"/>
+                    </div>
+                </apex:pageBlock>
+                <!--  
+                    Report Display and Export Form
+                 -->
+                <apex:pageBlock id="exportBlock" title="2. Preview and Export Data" rendered="{! oppRecords.size > 0 }" >
+                    <apex:pageBlockSection id="nameBlock" rendered="{! oppRecords.size > 0 }" >
+                        <apex:pageBlockSectionItem >
+                            <apex:outputLabel value="Enter the Sheet Name: "/>
+                            <apex:inputText value="{!sheetName}" style="width:300px" />
+                        </apex:pageBlockSectionItem>
+                        <apex:pageBlockSectionItem >
+                            <apex:commandButton id="exportBtn" value="Export to Smartsheet" action="{!sendToSmartsheet}" rerender="reportBlock,theMessages,statusPanel" disabled="{!oppRecords.size < 1}" status="status"/>
+                        </apex:pageBlockSectionItem>
+                    </apex:pageBlockSection>
+                    <apex:pageBlockSection id="oppReportSection" columns="1" rendered="{! oppRecords.size > 0 }">
+                        <apex:pageBlocktable value="{! oppRecords }" var="o" title="Data Preview">
+                            <apex:facet name="footer">{! oppRecords.size } opportunities returned</apex:facet>
+                            <apex:column value="{! o.Id }" />
+                            <apex:column value="{! o.Name }" />
+                            <apex:column value="{! o.StageName }" />
+                            <apex:column value="{! o.Type }" />                   
+                            <apex:column value="{! o.Probability }" />
+                        </apex:pageBlocktable> 
+                    </apex:pageBlockSection>
+                </apex:pageBlock>
+            </apex:outputPanel>
+        </apex:outputPanel>
+               
+        <apex:outputPanel id="importPanel">
+            <apex:outputPanel rendered="{!selectedOption != null && NOT(isExportSelected)}">
+                <c:SmartsheetImport objectname="Opportunity"/>
+            </apex:outputPanel>
+        </apex:outputPanel>
+        
+         
+    </apex:form>
+    <style type="text/css">
+       .customPopup{
+            background-color: white;
+            border-style: solid;
+            border-width: 2px;
+            left: 50%;
+            padding:10px;
+            position: absolute;
+            z-index: 9999;
+            /* These are the 3 css properties you will need to tweak so the pop 
+            up displays in the center of the screen. First set the width. Then set 
+            margin-left to negative half of what the width is. You can also add 
+            the height property for a fixed size pop up.*/
+            width: 500px;
+            margin-left: -250px;
+            top:100px;
+        }
+        .bPageBlock .pbTitle { width: 50%; }
+                       
+</style>    
+</apex:page>
