@@ -15,7 +15,7 @@
     limitations under the License.             
 *****************************************************************************
  -->
-<apex:page standardController="Opportunity" recordSetVar="opportunities" extensions="OpportunityToSmartsheet" title="Smartsheet Opportunity Pipeline Import/Export">
+<apex:page standardController="Opportunity" recordSetVar="opportunities" extensions="OpportunityToSmartsheet" title="Smartsheet Opportunity Pipeline Import/Export" action="{!oauthTarget}">
     <script>
           function setFocusOnLoad() {}  
     </script>
@@ -29,7 +29,39 @@
             </apex:actionStatus>
         </apex:outputPanel>
         <apex:pageMessages id="theMessages" escape="false" />
-        <apex:pageBlock id="selectionBlock">
+        <apex:pageBlock title="Smartsheet Authentication" rendered="{!token=='No Access Token Found.'}" id="smartsheetAuth">
+            <apex:pageBlockButtons >
+                <apex:commandButton action="{!authenticate}" value="Connect to Smartsheet" rerender="smartsheetAuth,selectionBlock"/>
+            </apex:pageBlockButtons>
+
+            <apex:pageBlockSection columns="2" id="authTypeBox">
+                <apex:pageBlockSectionItem >
+                    <apex:outputText value="Authentication Type"/>
+                    <apex:selectList value="{!authType}" size="1">
+                        <apex:selectOptions value="{!authTypeList}"/>
+                        <apex:actionSupport event="onchange" action="{!authTypeSelect}" rerender="authTypeBox,genTokenBox"/>
+                    </apex:selectList>
+                </apex:pageBlockSectionItem>
+                <apex:pageBlockSectionItem rendered="{! NOT(isOAuthSelected) }" id="genTokenBox">
+                    <apex:outputLabel value="Generated Token" for="tokenInput"/>
+                    <apex:inputText value="{!generatedToken}" id="tokenInput"/>
+                </apex:pageBlockSectionItem>
+                
+                <apex:pageBlockSectionItem >
+                    <apex:outputLabel value="Access Token" for="tokenOutput"/>
+                    <apex:outputText id="tokenOutput" rendered="{!token!=null}" value="{!token}"/>
+                </apex:pageBlockSectionItem>
+            </apex:pageBlockSection>
+        </apex:pageBlock>        
+         <apex:outputPanel layout="block" 
+            style="text-align: right;" 
+            id="deleteTokenLink" 
+            rendered="{! token != null && NOT(token=='No Access Token Found.')}">
+            <apex:commandLink action="{!toggleDeleteToken}" rerender="importPanel,exportPanel,selectionBlock,theform">
+                {! deleteTokenMessage }
+            </apex:commandLink>
+        </apex:outputPanel>       
+        <apex:pageBlock id="selectionBlock" rendered="{! token != null && NOT(token=='No Access Token Found.') && NOT(showDeleteTokenLink) }">
             <!-- 
                 Import/Export Selector
              -->
@@ -38,7 +70,7 @@
                 <apex:actionSupport event="onchange" action="{!importExport}" rerender="importPanel,exportPanel,selectionBlock,theform"/>
             </apex:selectList>
         </apex:pageBlock>
-        <apex:outputPanel id="exportPanel">
+        <apex:outputPanel id="exportPanel" rendered="{! token != null && NOT(token=='No Access Token Found.') && NOT(showDeleteTokenLink) }">
             <apex:outputPanel rendered="{!isExportSelected}">
                 <apex:pageBlock id="reportBlock" title="1. Run Report to get Opportunities">
                 <!-- 
@@ -94,20 +126,26 @@
                             <apex:column value="{! o.StageName }" />
                             <apex:column value="{! o.Type }" />                   
                             <apex:column value="{! o.Probability }" />
+                            <apex:column value="{! o.Amount }" />
                         </apex:pageBlocktable> 
                     </apex:pageBlockSection>
                 </apex:pageBlock>
             </apex:outputPanel>
         </apex:outputPanel>
                
-        <apex:outputPanel id="importPanel">
+        <apex:outputPanel id="importPanel" rendered="{! token != null && NOT(token=='No Access Token Found.') && NOT(showDeleteTokenLink) }">
             <apex:outputPanel rendered="{!selectedOption != null && NOT(isExportSelected)}">
                 <c:SmartsheetImport objectname="Opportunity"/>
             </apex:outputPanel>
         </apex:outputPanel>
-        
-         
+ 
+        <apex:outputPanel id="deleteTokenPanel" rendered="{!showDeleteTokenLink && token != null && NOT(token=='No Access Token Found.')}">
+            <apex:pageBlock title="Remove Access Token to Disconnect from Smartsheet">
+                <apex:commandButton action="{!deleteToken}" value="Remove Token"/>
+            </apex:pageBlock>
+        </apex:outputPanel>        
     </apex:form>
+    
     <style type="text/css">
        .customPopup{
             background-color: white;

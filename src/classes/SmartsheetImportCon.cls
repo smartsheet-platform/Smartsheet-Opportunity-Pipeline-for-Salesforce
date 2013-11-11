@@ -36,14 +36,14 @@
 ******************************************************************************/
 public with sharing class SmartsheetImportCon {
 	
-	private List<OpportunityPipelineConstants.Sheet> sheets;
-	private Map<String,String> columnIdNameMap;
-	private Map<String,String> objFields;
-	private Map<String,Schema.DisplayType> fieldTypeMap;
-	private OpportunityPipelineConstants.SmartsheetImp sContent;
-	private Map<String,OpportunityPipelineConstants.RowsImp> idRowMap;
+	private List<Smartsheet.Sheet> sheets;
+	private Map<String, String> columnIdNameMap;
+	private Map<String, String> objFields;
+	private Map<String, Schema.DisplayType> fieldTypeMap;
+	private Map<String, Smartsheet.Row> idRowMap;
 	private List<SObject> sobjectRecs;
-	
+	private String oauthState;
+    private SmartsheetApi api;  
 	
 	/* Public variables */
 	public List<MapWrapper> mapData 		{get;set;}	
@@ -51,17 +51,19 @@ public with sharing class SmartsheetImportCon {
 	public String objectName				{get;set;}
 	public boolean isConflictPresent		{get;set;}
 	public List<MergeWrapper> mergeSObjects {get;set;}
+	public Smartsheet.Sheet sContent		{get;set;}
 	
 	
 	/* Constructor */
 	public SmartsheetImportCon(){
 		
-		sheets  = new List<OpportunityPipelineConstants.Sheet>();
-		objFields		  = new Map<String,String>();
-		fieldTypeMap 	  = new Map<String,Schema.DisplayType>();
-		mapData			  = new List<MapWrapper>();
-		sobjectRecs		  = new List<SObject>();
+		sheets  = new List<Smartsheet.Sheet>();
+		objFields = new Map<String, String>();
+		fieldTypeMap = new Map<String, Schema.DisplayType>();
+		mapData = new List<MapWrapper>();
+		sobjectRecs = new List<SObject>();
 		isConflictPresent = false;
+		api = new SmartsheetApi();
 		getAllSheets();
 			
 	}
@@ -69,39 +71,44 @@ public with sharing class SmartsheetImportCon {
 	/* Gets all available Sheets from the Smartsheet. */
 	public void getAllSheets(){
 		
-		try {		
-			String jsonBody = HttpUtil.sendSmartsheetReq('GET', null, OpportunityPipelineConstants.APIDOMAIN + OpportunityPipelineConstants.VERSIONURL + OpportunityPipelineConstants.SHEETSURL);		
-			sheets = (List<OpportunityPipelineConstants.Sheet>)JSON.deserialize(jsonBody,List<OpportunityPipelineConstants.Sheet>.class);
-			
-			if(sheets.size() == 0){
-				ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Info, 'No Sheets found - Create one in Smartsheet Site and Come back '));
+		try {
+			/* get sheets */
+			if(Test.isRunningTest()){
+				HttpClient.testResponse = TestHelper.getSheetsResponse(true);
+                List<Smartsheet.Sheet> sheets = (List<Smartsheet.Sheet>)JSON.deserialize(HttpClient.testResponse.getBody(), List<Smartsheet.Sheet>.class);
+			} else {
+				sheets = api.getSheets();
 			}
-		}catch(SmartsheetException e){
-			ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'Error getting sheets from Smartsheet ' + e.getMessage()));
+			
+			if(sheets.size() == 0) {
+				ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Info, 
+					'No Sheets found - Create one in Smartsheet Site and Come back '));
+			}
+		}catch(SmartsheetException e) {
+			ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+				'Error getting sheets from Smartsheet ' + e.getMessage()));
 		}
 	}
-	
 	
 	/* Build a SelectOption List for all available Sheets. */
 	public List<SelectOption> getsheets(){
 		
 		List<SelectOption> options = new List<SelectOption>();
 		
-		options.add(new SelectOption('','-- Select from Available Sheets --'));
+		options.add(new SelectOption('', '-- Select from Available Sheets --'));
 	
 		
-		for(OpportunityPipelineConstants.Sheet s : sheets){
-			options.add(new SelectOption(s.id,s.name));
+		for(Smartsheet.Sheet s : sheets){
+			options.add(new SelectOption(String.valueOf(s.id), s.name));
 		}
 		
 		return options;
 	}
 	
-	
 	/* Get the fields/columns for the selected Sheet. Used for mapping */
 	public void getSheetFields(){
 		
-		mapData			= new List<MapWrapper>();
+		mapData = new List<MapWrapper>();
 		columnIdNameMap = new Map<String,String>();
 		
 		/* 
@@ -109,25 +116,24 @@ public with sharing class SmartsheetImportCon {
 			When this happens the API does not need to be called, only the page needs to be reset.
 		*/
 		if(sheetId != null || Test.isRunningTest()){
-			String endpoint = OpportunityPipelineConstants.APIDOMAIN + OpportunityPipelineConstants.VERSIONURL + OpportunityPipelineConstants.SHEETURL + '/' + sheetId;	
-			String jsonBody = HttpUtil.sendSmartsheetReq('GET', null, endpoint);
-			
+	
 			try {
-			
-				sContent = (OpportunityPipelineConstants.SmartsheetImp)JSON.deserialize(jsonBody,OpportunityPipelineConstants.SmartsheetImp.class);
-				 
+				if(!Test.isRunningTest()){
+					sContent = api.getSheet(Long.valueOf(sheetId));
+				}
+
 				if(sContent != null && sContent.columns != null){ 
-					for(Integer i=0;i<sContent.columns.size();i++){
-						columnIdNameMap.put(sContent.columns[i].id,sContent.columns[i].title);
-						mapData.add(new MapWrapper(sContent.columns[i].id,sContent.columns[i].title));
+					for(Integer i=0; i < sContent.columns.size(); i++) {
+						columnIdNameMap.put(String.valueOf(sContent.columns[i].id), sContent.columns[i].title);
+						mapData.add(new MapWrapper(String.valueOf(sContent.columns[i].id), sContent.columns[i].title));
 					}
 					
 					fieldsDescribe();
 					autoMatch();
 				}
-			
 			}catch(JSONException e){
-				ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'Unable to Parse ' + e.getMessage()));
+				ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+					'Unable to Parse ' + e.getMessage()));
 			}
 		}
 	}
@@ -152,8 +158,8 @@ public with sharing class SmartsheetImportCon {
 		
 		List<SelectOption> options = new List<SelectOption>();
 		
-		options.add(new SelectOption('Salesforce','Salesforce'));
-		options.add(new SelectOption('Smartsheet','Smartsheet'));
+		options.add(new SelectOption('Salesforce', 'Salesforce'));
+		options.add(new SelectOption('Smartsheet', 'Smartsheet'));
 		
 		return options;
 		
@@ -183,11 +189,10 @@ public with sharing class SmartsheetImportCon {
 	/*
 		Main method that performs the Import from Smartsheet and Updates the Salesforce records.
 	*/
-	
 	public void performImport(){
 		
-		Map<String,String> colIdName = new Map<String,String>();
-		idRowMap					 = new Map<String,OpportunityPipelineConstants.RowsImp>();
+		Map<String, String> colIdName = new Map<String, String>();
+		idRowMap = new Map<String, Smartsheet.Row>();
 		
 		/* If Conflict is Present and is resolved. */
 		if(isConflictPresent){
@@ -205,38 +210,45 @@ public with sharing class SmartsheetImportCon {
 		}else {
 			/* Build the SObject Records */
 			for(MapWrapper ow : mapData){
-				colIdName.put(ow.columnId,ow.oFieldName);	
+				colIdName.put(ow.columnId, ow.oFieldName);	
 			}
-		
-			for(OpportunityPipelineConstants.RowsImp row : sContent.rows){
+			
+			for(Smartsheet.Row row : sContent.rows){
 				SObject thisObj;
 				
-				for(OpportunityPipelineConstants.CellsImp c : row.cells){
+				for(Smartsheet.Cell c : row.cells){
                     try{
-                        if(colIdName.get(c.columnId) != null && colIdName.get(c.columnId) == 'Id'){
+                    	/* Adding the Object ID cell value */
+                        if(colIdName.get(String.valueOf(c.columnId)) != null && colIdName.get(String.valueOf(c.columnId)) == 'Id'){
                             thisObj = Schema.getGlobalDescribe().get(objectName).newSObject(c.value);
-                            idRowMap.put(c.value,row);	
+                            idRowMap.put(c.value, row);	
                         }
                     }catch(NullPointerException e){
-                        /* there isn't a column mapped to OpportunityID */
-                    	ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'One Smartsheet column needs to be mapped to the ' + objectName + ' ID column.'));
+                        /* there isn't a column mapped to Object ID */
+						System.debug('One Smartsheet column needs to be mapped to the ' + objectName + ' ID column.');                        
+                    	ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+                    		'One Smartsheet column needs to be mapped to the ' + objectName + ' ID column.'));
                     	return;
                     }catch(StringException e){
+						System.debug(e.getMessage() + '. The value of the Smartsheet column mapped to the ' + objectName + ' ID column is not a valid salesforce ID. ie: 006D000000CpOSy');                        
                         /* column mapped to OpportunityId contains invalid data */
-                    	ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, e.getMessage() + '. The value of the Smartsheet column mapped to the ' + objectName + ' ID column is not a valid salesforce ID. ie: 006D000000CpOSy'));
+                    	ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+                    		e.getMessage() + '. The value of the Smartsheet column mapped to the ' + objectName + ' ID column is not a valid salesforce ID. ie: 006D000000CpOSy'));
                     	return;                        
                     }
 				}
 				
-
-				for(OpportunityPipelineConstants.CellsImp c : row.cells){
+				/* Adding other cell values that aren't Object ID */
+				for(Smartsheet.Cell c : row.cells){
                     try{
-                        if(colIdName.get(c.columnId) != null && colIdName.get(c.columnId) != 'Id'){
-                            thisObj.put(colIdName.get(c.columnId),convertStringToObject(colIdName.get(c.columnId),c.value));  
+                        if(colIdName.get(String.valueOf(c.columnId)) != null && colIdName.get(String.valueOf(c.columnId)) != 'Id'){
+                            thisObj.put(colIdName.get(String.valueOf(c.columnId)), convertStringToObject(colIdName.get(String.valueOf(c.columnId)), c.value));  
                         }
                     }catch(NullPointerException e){
-                         /* there isn't a column mapped to OpportunityID */
-                    	ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'A Smartsheet column needs to be mapped to the ' + objectName + ' ID column.'));
+						System.debug('There was an issue with the value of ' + colIdName.get(String.valueOf(c.columnId)));                        
+                         /* there was an issue adding a cell value, other than Object ID */
+                    	ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+                    		'There was an issue with the value of ' + colIdName.get(String.valueOf(c.columnId))));
                     	return;                        
                     }
                 }
@@ -254,26 +266,27 @@ public with sharing class SmartsheetImportCon {
 			else
 				return;	
 		}catch(DMLException e){		
-			ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'Error updating records ' + e.getMessage()));
+			ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+				'Error updating records ' + e.getMessage()));
 			return;
 		}
 		
-		ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Info, 'Successfully Imported ' + sobjectRecs.size() +  ' Records'));
+		ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Info, 
+			'Successfully Imported ' + sobjectRecs.size() +  ' Records'));
 	}
 	
 	/*
 		Method that does the Compare. Builds the dynamic SOQL and queries the Salesforce Database to retrieve Records.
 	*/
-	
 	public void compareRecords(List<SObject> sobjRecs){
 		
-		Map<String,SObject> sobjMap = new Map<String,SObject>();
-		Map<String,SObject> sfMap   = new Map<String,SObject>();
-		mergeSObjects 				= new List<MergeWrapper>();
-		Set<ID> sobjids 			= new Set<Id>();
+		Map<String, SObject> sobjMap = new Map<String, SObject>();
+		Map<String, SObject> sfMap = new Map<String, SObject>();
+		mergeSObjects = new List<MergeWrapper>();
+		Set<ID> sobjids = new Set<Id>();
 		
 		for(SObject s : sobjRecs){
-			sobjMap.put(s.id,s);
+			sobjMap.put(s.id, s);
 			sobjids.add(s.id);
 		}
 		
@@ -313,7 +326,8 @@ public with sharing class SmartsheetImportCon {
 		}
 		
 		if(mergeSObjects.size() > 0){
-			ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Warning, 'There are conflicts for ' + mergeSObjects.size()  +  ' Records'));
+			ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Warning, 
+				'There are conflicts for ' + mergeSObjects.size()  +  ' Records'));
 			isConflictPresent = true;
 		}
 	}

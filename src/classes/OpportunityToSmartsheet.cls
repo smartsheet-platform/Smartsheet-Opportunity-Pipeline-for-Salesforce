@@ -30,7 +30,6 @@ public with sharing class OpportunityToSmartsheet {
     public List<OpportunityMapWrapper> mapData      {get;set;}
     public String selectedStage                     {get;set;}
     public String selectedProb                      {get;set;}      
- //   public boolean showMappings                     {get;set;}
     public boolean clickedOnce                      {get;set;}
     
     // Defined to just hold dates
@@ -39,11 +38,33 @@ public with sharing class OpportunityToSmartsheet {
     public List<Opportunity> oppRecords             {get;set;}
     
     public String  selectedOption                   {get;set;}
+    public String  selectedAuthType                 {get;set;}
     public boolean isExportSelected                 {get;set;}
-  
+    public boolean isOAuthSelected                  {get;set;}
+    public boolean isAuthenticated                  {get;set;}
+    public boolean showDeleteTokenLink              {get;set;}
+    public String deleteTokenMessage                {get;set;}
+
+    public boolean isNotLoggedIn                 	{get;set;}
+  	public String token {
+		get {
+			if (token == null)
+				return 'No Access Token Found.';
+			return token;
+		}
+		set; 
+	}
+  	public String authType { get; set; }
+	public String generatedToken { get; set; }
+	
+	public List<SelectOption> getAuthTypeList() {
+		return AUTH_TYPE_LIST;
+	}
+
+	  
     // Private 
-    private List<OpportunityPipelineConstants.Sheet> sheets;  
-    private OpportunityPipelineConstants.Result newSheet;
+    private List<Smartsheet.Sheet> sheets;  
+    private Smartsheet.Sheet newSheet;
     private Apexpages.StandardSetController setCon;
     private Map<String,String> columnIdNameMap;
     private Map<String,String> opportunityFields;
@@ -52,35 +73,41 @@ public with sharing class OpportunityToSmartsheet {
     private Map<String,List<String>> fieldPicklistsMap;
     
     private final String SHEET_NAME = 'Opportunity Pipeline ' + String.valueof(System.now());
+    private String oauthState;
+    private SmartsheetApi api;       
+    
+   
+ 	private static List<SelectOption> AUTH_TYPE_LIST = new SelectOption[] {
+		new SelectOption('OAuth2.0', 'OAuth 2.0'),
+		new SelectOption('UserGeneratedToken', 'User Generated Token')
+	};  
        
     // Constructor - currently set on the standardsetController so that the button can be displayed on the List Views of Opportunity
     public  OpportunityToSmartsheet(Apexpages.StandardSetController controller){
-        sheets = new List<OpportunityPipelineConstants.Sheet>();
-        mapData = new List<OpportunityMapWrapper>();
+        sheets = new List<Smartsheet.Sheet>();
         oppRecords = new List<Opportunity>();
         columnIdNameMap = new Map<String,String>();
         opportunityFields = new Map<String,String>();
         opportunityLabels = new Map<String,String>();
         oppFieldTypeMap = new Map<String,Schema.DisplayType>();
         fieldPicklistsMap = new Map<String,List<String>>();
-		sheetName = SHEET_NAME;
+        sheetName = SHEET_NAME;
         opp1 = new Opportunity();
         opp2 = new Opportunity();
         clickedOnce = false;
-            
-        if(OpportunityPipelineConstants.getAccessToken() == null || OpportunityPipelineConstants.getAccessToken() == ''){
-                String noTokenMessage = 'No Access Token Found. Make sure obtain a token by registering your ';
-            noTokenMessage += 'Smartsheet account for a third-party app in the Developer Tools settings ';
-            noTokenMessage += 'of the Smartsheet UI. Use the access token in the Custom Settings of this ';
-            noTokenMessage += 'Salesforce application.';
-                    
-            ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, noTokenMessage));
-            return;
-        }
-            
-        if(OpportunityPipelineConstants.VERSIONURL == null || OpportunityPipelineConstants.VERSIONURL == '')
-            OpportunityPipelineConstants.VERSIONURL = '/1.1'; // Uses 1.1 as Default
+        showDeleteTokenLink = false;
+        isOAuthSelected = true;
+        deleteTokenMessage = 'Disconnect from Smartsheet';
+        authType = 'OAuth2.0';
+        mapData = new List<OpportunityMapWrapper>();
         
+        api = new SmartsheetApi();
+		User u = [SELECT Access_Token__c FROM User WHERE Id = :UserInfo.getUserId()];
+		token = u.Access_Token__c;
+		
+        /*
+         * Getting Opportunity field values and labels and put in a Map
+         */
         Map<String, Schema.SObjectField> fieldMap = Opportunity.getSObjectType().getDescribe().fields.getMap();
         
         for(Schema.SObjectField f : fieldMap.values()){
@@ -97,6 +124,59 @@ public with sharing class OpportunityToSmartsheet {
             }
         }
     }
+
+	/* 
+	 * start OAuth flow by redirecting user to Smartsheet authorization URL 
+	 */
+	public PageReference authenticate() {
+		if (authType.equals('UserGeneratedToken')) {
+			if (generatedToken != null && !generatedToken.equals(''))
+				updateToken(generatedToken);
+			else {
+				ApexPages.addmessage(new ApexPages.message(ApexPages.severity.ERROR,
+						'Generated Token is empty, please set the user generated token in the Generated Token field'));
+			}
+		} else {	
+			/*
+			 * OAuth
+			 * 
+			 * create random, save it to User object
+			 */
+			oauthState = '' + Crypto.getRandomLong();
+			User u = [SELECT Id, OAuth_State__c FROM User WHERE Id = :UserInfo.getUserId()];
+			u.OAuth_State__c = oauthState;
+			
+			try {
+				update u;
+			} catch (DmlException e) {
+				System.debug('Failed to update User, ' + e.getMessage());
+				ApexPages.addmessage(new ApexPages.message(ApexPages.severity.INFO,
+						'Failed to update User object, please try again'));
+			}
+			
+			String authUrl = api.getRequestAuthCodeUrl(oauthState);
+			PageReference authPage = new PageReference(authUrl);
+			authPage.setRedirect(true);
+			return authPage;
+		}
+		return null;
+	}
+
+	private void updateToken(String newToken) {
+		User u = [SELECT Access_Token__c, Refresh_Token__c, Token_Expires__c FROM User WHERE Id = :UserInfo.getUserId()];
+		u.Access_Token__c = newToken;
+		u.Refresh_Token__c = null;
+		u.Token_Expires__c = null;
+		try {
+			update u;
+		} catch (DmlException e) {
+			System.debug('Failed to update User, '+ e.getMessage());
+			ApexPages.addmessage(new ApexPages.message(ApexPages.severity.INFO,
+				'Failed to update User object, please try again'));
+		}
+		token = newToken;
+		api = new SmartsheetApi();
+	}    
     
     public List<SelectOption> getAllOptions(){
         List<SelectOption> options = new List<SelectOption>();
@@ -114,11 +194,90 @@ public with sharing class OpportunityToSmartsheet {
         }
     }
     
+    public void authTypeSelect(){
+        if(authType.equals('OAuth2.0')) {
+            isOAuthSelected = true;
+        } else {
+            isOAuthSelected = false;
+        }
+    }
+    
+    public void toggleDeleteToken(){
+        if(showDeleteTokenLink) {
+           showDeleteTokenLink = false;
+           deleteTokenMessage = 'Disconnect from Smartsheet';
+        } else {
+           showDeleteTokenLink = true;
+           deleteTokenMessage = 'Go Back to Import/Export';
+        }
+    }
+
+    
+	/* 
+	 * Smartsheet OAuth redirect_url is set to the VF page. When Smartsheet makes callback,
+	 * this oauthTarget() method is get called.
+	 */
+	public PageReference oauthTarget() {
+		/* 
+		 * retrieve oauth state from User object
+		 */
+		User u = [SELECT Id, OAuth_State__c FROM User WHERE Id = :UserInfo.getUserId()];
+		oauthState = u.OAuth_State__c;
+		
+		String code = ApexPages.currentPage().getParameters().get('code');
+		String state = ApexPages.currentPage().getParameters().get('state');
+		String error = ApexPages.currentPage().getParameters().get('error');
+
+		if (code == null && state == null && error == null) {
+			/* 
+			 * Regular VF visit, not OAuth callback
+			 */
+			return null;
+		}
+		
+		/* 
+		 * check state
+		 */
+		if (error != null) {
+			System.debug('oauthTarget: non-null error returned ' + error);
+			ApexPages.addmessage(new ApexPages.message(ApexPages.severity.ERROR,
+					'Smartsheet API error returned: ' + error));
+			
+			//throw new SmartsheetException('oauthTarget: non-null error returned, ' + error);
+		} else if (state == null || !state.equals(oauthState)) {
+			System.debug('oauthTarget: state is null or does not match, ' + state);
+			throw new SmartsheetException('oauthTarget: state is null or does not match, ' + state);
+		} else {
+			/*
+			 * requesting authroization code is successful
+ 			 *
+			 * request access token
+			 */
+			Smartsheet.AccessToken accessToken = api.getAccessToken(code);
+			token = accessToken.access_token;
+			ApexPages.addmessage(new ApexPages.message(ApexPages.severity.INFO,
+					'Logged in to Smartsheet successfully'));
+			
+		}
+		return null;
+	}
+	/* 
+	 * action method to delete current token
+	 */
+	public PageReference deleteToken() {
+		updateToken(null);
+		ApexPages.addmessage(new ApexPages.message(ApexPages.severity.INFO,
+				'Deleted access token, please login again to use Smartsheet API'));
+		return null;
+	}
+
+    
+    
     /*
-            Generate the report for the Opportunity Pipeline with filters
-    */
+     *	Generate the report for the Opportunity Pipeline with filters
+     */
     public void report(){
-        String soql = 'SELECT Id, Name, StageName, Type, Probability FROM Opportunity';
+        String soql = 'SELECT Id, Name, StageName, Type, Probability, Amount FROM Opportunity';
         String whrClause = '';
         
         if(selectedStage != null && selectedStage != ''){
@@ -135,7 +294,7 @@ public with sharing class OpportunityToSmartsheet {
         
         if(opp2.CloseDate != null){
             whrClause += ' CloseDate < ' + String.valueof(opp2.CloseDate) + ' AND ';
-    	}            
+        }            
         
         if(whrClause != ''){
             soql = soql + ' WHERE ' + whrClause.removeEnd(' AND ');
@@ -144,45 +303,58 @@ public with sharing class OpportunityToSmartsheet {
         oppRecords = Database.query(soql);      
         clickedOnce = false;
         /*
-                Checks Record set to make sure it's under smartsheet row limit of 5000
+            Checks Record set to make sure it's under smartsheet row limit of 5000
         */
         if(oppRecords.size() >= 5000){
-            ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Warning, 'Your query returned more than 5,000 records. Smartsheet restricts a sheet to 5,000 rows. Please filter your results before trying to export to Smartsheet'));
-            return;        	
+            ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Warning, 
+                'Your query returned more than 5,000 records. Smartsheet restricts a sheet to 5,000 rows. Please filter your results before trying to export to Smartsheet'));
+            return;         
         }
                    
     }
         
     /*
-            Send the data to Smartsheet. Since Smartsheet supports only 1 row insert, check the size of records and if less than 10 iterate over the number of records 
-            else perform a batch process to send the data.
+        Send the data to Smartsheet. Since Smartsheet supports only 1 row insert, check the size of records and if less than 10 iterate over the number of records 
+        else perform a batch process to send the data.
     */
     public void sendToSmartsheet(){
+        Long newSheetId;
               
         if(oppRecords == null || oppRecords.size() == 0){
             ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Warning, 'Nothing to send '));
             return;
         }
             
+        // re-initialize mapData
+        if(mapData.size() > 0){
+	        mapData = new List<OpportunityMapWrapper>();
+        }
+            
         setFields();
+        
         for(OpportunityMapWrapper om : mapData){
             if(om.oFieldName != null || om.oFieldName != ''){
                 om.columnName = opportunityLabels.get(om.oFieldName);
             }
         }
         
-        createSheet();                
-        doSend(oppRecords);
+        // Create New Blank Sheet in Smartsheet
+        newSheetId = createSheet();
+                        
+        // Populate the newly created sheet
+        doSend(oppRecords, newSheetId);
             
-        ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Info, 'Smartsheet ' + newSheet.name + ' created. Go<a href="' + newSheet.permaLink + '" target="_blank">here</a>to view the sheet.'));
-        clickedOnce = true;    
+        ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Info, 
+            'Smartsheet ' + newSheet.name + ' created. Go<a href="' + newSheet.permaLink + '" target="_blank">here</a>to view the sheet.'));
+        clickedOnce = true;  
+
     }
         
-    private void createSheet(){
-        List<OpportunityPipelineConstants.Columns> cols = new List<OpportunityPipelineConstants.Columns>();
+    private Long createSheet() {
+        List<Smartsheet.Column> cols = new List<Smartsheet.Column>();
         
         for(OpportunityMapWrapper om : mapData){
-            OpportunityPipelineConstants.Columns col = new OpportunityPipelineConstants.Columns();
+            Smartsheet.Column col = new Smartsheet.Column();
             col.title = om.columnName;
                 
             if(om.oFieldName == 'Id'){
@@ -192,7 +364,6 @@ public with sharing class OpportunityToSmartsheet {
             if(oppFieldTypeMap.get(om.oFieldName) == DisplayType.PICKLIST){
                 col.type = 'PICKLIST';
                 col.options = fieldPicklistsMap.get(om.oFieldName);
-                
             }else if(oppFieldTypeMap.get(om.oFieldName) == DisplayType.Boolean){
                 col.type = 'CHECKBOX';
             }else if(oppFieldTypeMap.get(om.oFieldName) == DisplayType.Date){
@@ -203,94 +374,124 @@ public with sharing class OpportunityToSmartsheet {
             
             cols.add(col);
         }
-            
-        OpportunityPipelineConstants.Smartsheet nSheet = new OpportunityPipelineConstants.Smartsheet();
-        
+
+        Smartsheet.Sheet nSheet = new Smartsheet.Sheet();
         /*
                 Checks the value of new sheetName. Assigns SHEET_NAME constant if sheetName is null or blank
         */
         if(sheetName != null && sheetName.length() > 0){
-                nSheet.name = sheetName;
+            nSheet.name = sheetName;
         } else {
-                nSheet.name = SHEET_NAME;
+            nSheet.name = SHEET_NAME;
         }
         nSheet.columns = cols;
-            
-        try {
+        
+    	
+    	try {
             /*
                 POST to Create the Sheet first
             */
-            String endpoint = OpportunityPipelineConstants.APIDOMAIN + OpportunityPipelineConstants.VERSIONURL + OpportunityPipelineConstants.SHEETSURL;
-            String jsonBody = HttpUtil.sendSmartsheetReq('POST', JSON.serialize(nSheet), endpoint);         
-            OpportunityPipelineConstants.SheetResponse resp = (OpportunityPipelineConstants.SheetResponse)JSON.deserialize(jsonBody,OpportunityPipelineConstants.SheetResponse.class);
+            nSheet.rows = null;
             
-            if(resp.message == 'SUCCESS' && resp.resultCode == 0){
-                newSheet = resp.result;
-            }else{
-                ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'Error with Smartsheet ' + resp.message)); 
-                return;
+            if(Test.isRunningTest()){
+                HttpClient.testResponse = TestHelper.getNewSheetResponse(true);
+                Smartsheet.SheetResult createResult = (Smartsheet.SheetResult)JSON.deserialize(HttpClient.testResponse.getBody(), Smartsheet.SheetResult.class);
+	            
+	            if(createResult.message == 'SUCCESS' && createResult.resultCode == 0){
+	            	newSheet = createResult.result;
+	            }else{
+	                ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+	                    'Error with Smartsheet ' + createResult.message)); 
+	                return 0;
+	            }
+            } else {
+                // create sheet
+                Smartsheet.SheetResult createResult = api.createSheet(nSheet);
+
+	            if(createResult.message == 'SUCCESS' && createResult.resultCode == 0){
+	                newSheet = createResult.result;
+	            }else{
+	                ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+	                    'Error with Smartsheet ' + createResult.message)); 
+	                return 0;
+	            }
             }
             
             mapData = new List<OpportunityMapWrapper>();
             
-            for(OpportunityPipelineConstants.Columns cl : newSheet.columns){
-                mapData.add(new OpportunityMapWrapper(cl.Id,cl.title));
+            for(Smartsheet.Column cl : newSheet.columns){
+                mapData.add(new OpportunityMapWrapper(cl.Id, cl.title));
             }
-            
-            // Perform the auto match with Opportunity Field labels.
+
+            /*
+             * Perform the auto match with Opportunity Field labels.
+             */
+
             if(mapData.size() > 0) {
                 autoMatch();
             }
-                                
-        }catch(SmartsheetException e){
-            ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'Error getting templates from Smartsheet ' + e.getMessage()));
+         
+            /*
+             * Return the id of the newly created sheet
+             */
+            return newSheet.id;                    
+      }catch(SmartsheetException e){
+            ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+                'Error creating a sheet in Smartsheet ' + e.getMessage()));
+            return 0;
         }
     }
     
     /* 
-            Called from SendToSmartSheet method above, sends one opportunity record at a time.
+        Called from SendToSmartSheet method above, sends one opportunity record at a time.
     */
-        
-        private void doSend(List<Opportunity> opps){
-            String endpoint = OpportunityPipelineConstants.APIDOMAIN + OpportunityPipelineConstants.VERSIONURL + OpportunityPipelineConstants.SHEETURL + '/' + newSheet.Id + '/rows';
-            List<OpportunityPipelineConstants.Rows> allCells = new List<OpportunityPipelineConstants.Rows>();
-            List<OpportunityPipelineConstants.RowData> allRows = new List<OpportunityPipelineConstants.RowData>();
-            
-            for(Opportunity o : opps){
-                allCells = new List<OpportunityPipelineConstants.Rows>();
-                OpportunityPipelineConstants.RowData newR = new OpportunityPipelineConstants.RowData();
-                
-                for(OpportunityMapWrapper om : mapData){
-                    if(om.oFieldName != null && om.oFieldName != ''){
-                        OpportunityPipelineConstants.Rows newRow = new OpportunityPipelineConstants.Rows();                               
-                        newRow.columnId = om.columnId;
-                        newRow.value = String.valueof(o.get(om.oFieldName));
-                        newRow.strict = false;
-                        allCells.add(newRow);   
-                    }
-                }
-                newR.cells = allCells;
-                allRows.add(newR);
-            }
-            
-            OpportunityPipelineConstants.RowWrapper smartSheetData = new OpportunityPipelineConstants.RowWrapper();
-            smartsheetData.rows = allRows; 
-            smartsheetData.toBottom = true;
-            
-            String reqBody = JSON.serialize(smartsheetData);
-            
-            try {           
-                String jsonBody = HttpUtil.sendSmartsheetReq('POST', reqBody, endpoint);
-                system.debug('Response ' + jsonBody);   
-            }catch(SmartsheetException e){
-                ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 'Problem posting to Smartsheet: ' + e.getMessage()));
-            }
-        }
     
-        /*
+    private void doSend(List<Opportunity> opps, Long sheetId){
+        List<Smartsheet.Row> allRows = new List<Smartsheet.Row>();
+
+        for(Opportunity o : opps) {
+            // create row obj for each o
+            List<Smartsheet.Cell> rowCells = new List<Smartsheet.Cell>();
+            Smartsheet.Row newRow = new Smartsheet.Row();
+
+            for(OpportunityMapWrapper om : mapData) {
+                if(om.oFieldName != null && om.oFieldName != '') {
+                    /*
+                     * Build Cell Objects
+                     */
+                    Smartsheet.Cell newCell = new Smartsheet.Cell();                               
+                    newCell.columnId = om.columnId;
+                    newCell.value = String.valueof(o.get(om.oFieldName));
+                    newCell.strict = false;
+                    rowCells.add(newCell);   
+                }
+            }
+            newRow.cells = rowCells;
+            allRows.add(newRow);
+        }
+        
+        // InsertRows = RowWrapper
+
+        Smartsheet.InsertRows smartsheetData = new Smartsheet.InsertRows();
+        smartsheetData.rows = allRows; 
+        smartsheetData.toBottom = true;
+        
+        try {
+        	if(Test.isRunningTest()){
+ 				HttpClient.testResponse = TestHelper.getInsertRowsResponse(true);
+                Smartsheet.RowsResult rowsRes = (Smartsheet.RowsResult)JSON.deserialize(HttpClient.testResponse.getBody(), Smartsheet.RowsResult.class);        	
+        	} else {
+	            Smartsheet.RowsResult rowsRes = api.insertRows(sheetId, smartsheetData);
+        	} 
+        }catch(SmartsheetException e){
+            ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.Error, 
+                'Problem posting to Smartsheet: ' + e.getMessage()));
+        }
+    }
+    
+    /*
         Performs the automatch of the Column Names from Sheet and Opportunity Field Labels. 
     */
-    
     public void autoMatch(){
             
         for(OpportunityMapWrapper ow : mapData){
@@ -300,16 +501,16 @@ public with sharing class OpportunityToSmartsheet {
     }
     
     /*
-        Sets the default fields for Sheet without Template 
+        Sets the fields for Sheet
     */
-    
     public void setFields(){
             
-        mapData.add(new OpportunityMapWrapper(null,'Opportunity ID','Id'));
-        mapData.add(new OpportunityMapWrapper(null,'Name','Name'));
-        mapData.add(new OpportunityMapWrapper(null,'Stage','StageName'));
-        mapData.add(new OpportunityMapWrapper(null,'Opportunity Type','Type'));
-        mapData.add(new OpportunityMapWrapper(null,'Probability (%)','Probability'));
+        mapData.add(new OpportunityMapWrapper(null, 'Opportunity ID','Id'));
+        mapData.add(new OpportunityMapWrapper(null, 'Name','Name'));
+        mapData.add(new OpportunityMapWrapper(null, 'Stage','StageName'));
+        mapData.add(new OpportunityMapWrapper(null, 'Opportunity Type','Type'));
+        mapData.add(new OpportunityMapWrapper(null, 'Probability (%)','Probability'));
+        mapData.add(new OpportunityMapWrapper(null, 'Amount','Amount'));
     }
     
     public void addRow(){
@@ -317,13 +518,12 @@ public with sharing class OpportunityToSmartsheet {
     }
     
     public void removeRow(){
-        mapData.remove(mapData.size()-1);
+        mapData.remove(mapData.size() - 1);
     }
     
     /*
         Getter Methods.
     */
-    
     public List<SelectOption> getallStages(){
             
         List<SelectOption> options = new List<SelectOption>();
@@ -343,7 +543,7 @@ public with sharing class OpportunityToSmartsheet {
         List<SelectOption> options = new List<SelectOption>();
         options.add(new SelectOption('','All'));
         Integer j = 0;
-        for(integer i=0;i<10;i++){
+        for(integer i=0; i<10; i++){
             j += 10;
             options.add(new SelectOption('>'+j,'>'+j));                       
         }
@@ -371,10 +571,9 @@ public with sharing class OpportunityToSmartsheet {
     }
     
     /*   Wrapper class  */
-    
     public class OpportunityMapWrapper {
             
-        public String   columnId                {get;set;}
+        public Long   columnId                {get;set;}
         public String   columnName              {get;set;}
         public String   oFieldName              {get;set;}
         
@@ -382,12 +581,12 @@ public with sharing class OpportunityToSmartsheet {
                 
         }
         
-        public OpportunityMapWrapper(String cId,String cName){
+        public OpportunityMapWrapper(Long cId,String cName){
             this.columnId = cId;
             this.columnName = cName;
         }
         
-        public OpportunityMapWrapper(String cId, String cName, String fieldName){
+        public OpportunityMapWrapper(Long cId, String cName, String fieldName){
             this.columnId = cId;
             this.columnName = cName;
             this.oFieldName = fieldName;

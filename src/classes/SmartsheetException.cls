@@ -13,6 +13,6 @@
 	See the License for the specific language governing permissions and       
 	limitations under the License.             
 *****************************************************************************/
-public with sharing class SmartsheetException extends Exception {
+public with sharing class SmartsheetException extends Exception{
 
 }
