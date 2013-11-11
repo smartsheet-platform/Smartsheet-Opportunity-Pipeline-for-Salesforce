@@ -22,23 +22,23 @@ private class TestSmartsheetImportCon {
 		
 		List<Opportunity> newOpps = new List<Opportunity>();
         
-        newOpps.add(new Opportunity(Name='Test1',StageName='Closed - Won',CloseDate=system.now().date().addDays(-2),Type='New Customer',Probability=50));
-        newOpps.add(new Opportunity(Name='Test2',StageName='Prospecting',CloseDate=system.now().date().addDays(-1),Type='New Customer',Probability=97));
-        newOpps.add(new Opportunity(Name='Test3',StageName='Closed - Won',CloseDate=system.now().date().addDays(5),Type='New Customer',Probability=20));
-        newOpps.add(new Opportunity(Name='Test4',StageName='Prospecting',CloseDate=system.now().date().addDays(10),Type='New Customer',Probability=35));
-        newOpps.add(new Opportunity(Name='Test5',StageName='Upgrade',CloseDate=system.now().date().addDays(-10),Type='Existing Customer',Probability=80));
+        newOpps.add(new Opportunity(Name='Test1',StageName='Closed - Won',CloseDate=system.now().date().addDays(-2),Type='New Customer',Probability=50,Amount=35000));
+        newOpps.add(new Opportunity(Name='Test2',StageName='Prospecting',CloseDate=system.now().date().addDays(-1),Type='New Customer',Probability=97,Amount=675000));
+        newOpps.add(new Opportunity(Name='Test3',StageName='Closed - Won',CloseDate=system.now().date().addDays(5),Type='New Customer',Probability=20,Amount=210000));
+        newOpps.add(new Opportunity(Name='Test4',StageName='Prospecting',CloseDate=system.now().date().addDays(10),Type='New Customer',Probability=35,Amount=120000));
+        newOpps.add(new Opportunity(Name='Test5',StageName='Upgrade',CloseDate=system.now().date().addDays(-10),Type='Existing Customer',Probability=80,Amount=90000));
         
         insert newOpps;
         
         List<Opportunity> insertedO = [Select Id, Name from Opportunity];
         
-        system.assertEquals(5,insertedO.size()); // Assert the inserted Opportunities
+        system.assertEquals(5, insertedO.size()); // Assert the inserted Opportunities
         
-        SmartSheetTestHelper.createConfigs(false);
+        Smartsheet_Config__c config = TestHelper.createTestConfig('testConfig');
 		
 		Test.startTest();
 		
-		HttpUtil.testResponse = SmartsheetTestHelper.getAllSheets(true);
+		HttpClient.testResponse = TestHelper.getSheetsResponse(true);
 		
 		SmartsheetImportCon testCon = new SmartsheetImportCon();
 		
@@ -48,9 +48,10 @@ private class TestSmartsheetImportCon {
 		testCon.getAllSheets();
 		
 		testCon.getsheets();
-		
-		HttpUtil.testResponse = SmartsheetTestHelper.getSheetWithRows(true, newOpps[0].id, newOpps[1].id);
-		
+	
+		HttpClient.testResponse = TestHelper.getSheetWithRows(true, newOpps[0].id, newOpps[1].id);
+		testCon.sContent = (Smartsheet.Sheet)JSON.deserialize(HttpClient.testResponse.getBody(), Smartsheet.Sheet.class);
+
 		testCon.getSheetFields();
 		
 		system.assertEquals(6, testCon.mapData.size());
@@ -59,36 +60,42 @@ private class TestSmartsheetImportCon {
 		
 		for(SmartsheetImportCon.MapWrapper mw : testCon.mapData){
 			
-			if(mw.columnName == 'Opportunity ID')
+			if(mw.columnName == 'Opportunity ID') {
 				mw.oFieldName = 'Id';
-			if(mw.columnName == 'Name')
+			}
+			if(mw.columnName == 'Name') {
 				mw.oFieldName = 'Name';
-			if(mw.columnName == 'Stage')
+			}
+			if(mw.columnName == 'Stage') {
 				mw.oFieldName = 'StageName';
-			if(mw.columnName == 'Close Date')
-				mw.oFieldName = 'CloseDate';	
-			if(mw.columnName == 'Opportunity Type')
-				mw.oFieldName = 'Type';			
-			if(mw.columnName == 'Probability')
-				mw.oFieldName = 'Probability';			
+			}
+			if(mw.columnName == 'Close Date') {
+				mw.oFieldName = 'CloseDate';
+			}
+			if(mw.columnName == 'Opportunity Type') {
+				mw.oFieldName = 'Type';
+			}
+			if(mw.columnName == 'Probability') {
+				mw.oFieldName = 'Probability';
+			}		
 				
 		}
-		
-		system.assertEquals(false,testCon.isConflictPresent);
+		system.assertEquals(false, testCon.isConflictPresent);
 		
 		testCon.performImport();
-		
+
 		testCon.isConflictPresent = true;
 		
 		for(SmartsheetImportCon.MergeWrapper w : testCon.mergeSObjects){
 			w.selected = 'Smartsheet';
 		}
 		
+
 		testCon.performImport();
-		
+
 		List<Opportunity> updated = [Select Id, Type, StageName from Opportunity where StageName = 'Testing Passed'];
 		
-		system.assertEquals(2,updated.size());
+		system.assertEquals(2, updated.size());
 		
 		Test.stopTest();
 	}

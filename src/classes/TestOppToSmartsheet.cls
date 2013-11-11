@@ -16,19 +16,19 @@
 @isTest
 private class TestOppToSmartsheet {
 	
-    static testmethod void testSmartsheetWOTemplates(){
+    static testmethod void testSmartsheet(){
     	 List<Opportunity> newOpps = new List<Opportunity>();
         
-        newOpps.add(new Opportunity(Name='Test1',StageName='Closed - Won',CloseDate=system.now().date().addDays(-2),Type='New Customer',Probability=50));
-        newOpps.add(new Opportunity(Name='Test2',StageName='Prospecting',CloseDate=system.now().date().addDays(-1),Type='New Customer',Probability=97));
-        newOpps.add(new Opportunity(Name='Test3',StageName='Closed - Won',CloseDate=system.now().date().addDays(5),Type='New Customer',Probability=20));
-        newOpps.add(new Opportunity(Name='Test4',StageName='Prospecting',CloseDate=system.now().date().addDays(10),Type='New Customer',Probability=35));
-        newOpps.add(new Opportunity(Name='Test5',StageName='Upgrade',CloseDate=system.now().date().addDays(-10),Type='Existing Customer',Probability=80));
-        newOpps.add(new Opportunity(Name='Test6',StageName='Closed - Won',CloseDate=system.now().date().addDays(-20),Type='New Customer',Probability=40));
-        newOpps.add(new Opportunity(Name='Test7',StageName='Qualification',CloseDate=system.now().date().addDays(30),Type='New Customer',Probability=45));
-        newOpps.add(new Opportunity(Name='Test8',StageName='Upgrade',CloseDate=system.now().date().addDays(-4),Type='Existing Customer',Probability=50));
-        newOpps.add(new Opportunity(Name='Test9',StageName='Closed - Won',CloseDate=system.now().date().addDays(-20),Type='New Customer',Probability=40));
-        newOpps.add(new Opportunity(Name='Test10',StageName='Qualification',CloseDate=system.now().date().addDays(30),Type='New Customer',Probability=45));
+        newOpps.add(new Opportunity(Name='Test1',StageName='Closed - Won',CloseDate=system.now().date().addDays(-2),Type='New Customer',Probability=50,Amount=15000));
+        newOpps.add(new Opportunity(Name='Test2',StageName='Prospecting',CloseDate=system.now().date().addDays(-1),Type='New Customer',Probability=97,Amount=125000));
+        newOpps.add(new Opportunity(Name='Test3',StageName='Closed - Won',CloseDate=system.now().date().addDays(5),Type='New Customer',Probability=20,Amount=220000));
+        newOpps.add(new Opportunity(Name='Test4',StageName='Prospecting',CloseDate=system.now().date().addDays(10),Type='New Customer',Probability=35,Amount=85000));
+        newOpps.add(new Opportunity(Name='Test5',StageName='Upgrade',CloseDate=system.now().date().addDays(-10),Type='Existing Customer',Probability=80,Amount=15000));
+        newOpps.add(new Opportunity(Name='Test6',StageName='Closed - Won',CloseDate=system.now().date().addDays(-20),Type='New Customer',Probability=40,Amount=270000));
+        newOpps.add(new Opportunity(Name='Test7',StageName='Qualification',CloseDate=system.now().date().addDays(30),Type='New Customer',Probability=45,Amount=120000));
+        newOpps.add(new Opportunity(Name='Test8',StageName='Upgrade',CloseDate=system.now().date().addDays(-4),Type='Existing Customer',Probability=50,Amount=250000));
+        newOpps.add(new Opportunity(Name='Test9',StageName='Closed - Won',CloseDate=system.now().date().addDays(-20),Type='New Customer',Probability=40,Amount=75000));
+        newOpps.add(new Opportunity(Name='Test10',StageName='Qualification',CloseDate=system.now().date().addDays(30),Type='New Customer',Probability=45,Amount=50000));
        
         insert newOpps;
         
@@ -37,15 +37,13 @@ private class TestOppToSmartsheet {
         /* Assert the inserted Opportunities */
         system.assertEquals(10,newOpps.size()); 
         
-        SmartSheetTestHelper.createConfigs(false);
-        
+        Smartsheet_Config__c config = TestHelper.createTestConfig('testConfig');
+
         
         // Tests start here 
         Test.startTest();
         
 	        Apexpages.Standardsetcontroller setCon = new Apexpages.Standardsetcontroller(newOpps);
-	        
-	        HttpUtil.testResponse = SmartSheetTestHelper.getTemplatesResponse(false);
 	        
 	        OpportunityToSmartSheet testCon = new OpportunityToSmartsheet(setCon);
 	        
@@ -53,18 +51,22 @@ private class TestOppToSmartsheet {
 	        testCon.getallProbabilities(); // get the probabilities
 	        testCon.getallStages(); // get all Opportunity Stages
 	        testCon.getOFields(); // get all Opportunity Fields
-	 		testCon.selectedOption   = 'Export';
+	 		testCon.selectedOption = 'Export';
 	        testCon.importExport();
-//	      	testCon.showMapper();	      	
-//	      	system.assertEquals(true,testCon.showMappings);
-	      		
+
+			testCon.authTypeSelect();
+			testCon.oauthTarget();
+			testCon.authenticate();
+			
+			testCon.toggleDeleteToken();
+			testCon.deleteToken();
+			testCon.sendToSmartsheet();
+			
 	      	testCon.addRow();
 	      	testCon.removeRow();
-//	      	testCon.hideMapper();  
-//	        system.assertEquals(false,testCon.showMappings);
 	      	
 	        testCon.report();
-	        system.assertEquals(10,testCon.oppRecords.size()); // Returns all the Opportunity Records as no filters are applied
+	        system.assertEquals(10, testCon.oppRecords.size()); // Returns all the Opportunity Records as no filters are applied
 	        
 	        testCon.selectedStage='Upgrade';
 	        testCon.selectedProb = '>40';
@@ -72,10 +74,8 @@ private class TestOppToSmartsheet {
 	        testCon.opp2.CloseDate = system.now().date().addMonths(3);
 	        testCon.report();    
 	          
-	        system.assertEquals(2,testCon.oppRecords.size()); // Returns filtered Opportunity Records as no filters are applied
-	      
-	      	HttpUtil.testResponse = SmartsheetTestHelper.getNewSheetResponse(true);
-	      
+	        system.assertEquals(2, testCon.oppRecords.size()); // Returns filtered Opportunity Records as no filters are applied
+	      	
 	        testCon.sendToSmartsheet();
 	        
         Test.stopTest();
@@ -86,51 +86,37 @@ private class TestOppToSmartsheet {
 	
 	static testmethod void testConstants(){
 		
-		SmartsheetTestHelper.createConfigs(true);
-		
-		String accessToken = OpportunityPipelineConstants.getAccessToken();		
-		system.assertNotEquals(null, accessToken);
-		
-		String url 		   = OpportunityPipelineConstants.APIDOMAIN;
-		system.assertNotEquals(null, url);
-	
-		OpportunityPipelineConstants.Sheet s = new OpportunityPipelineConstants.Sheet();		
+        Smartsheet_Config__c config = TestHelper.createTestConfig('testConfig');
+
+		Smartsheet.Sheet s = new Smartsheet.Sheet();		
 		s.accessLevel = 'OWNER';
-		s.description = 'test';
-		s.id  		  = 'test';
 		s.name		  = 'testsheet';
 		
-		OpportunityPipelineConstants.Columns col = new OpportunityPipelineConstants.Columns();
-		col.id = '1';
+		Smartsheet.Column col = new Smartsheet.Column();
+		col.id = 1;
 		col.index = 1;
 		col.primary = true;
 		col.title = 'test';
 		col.type  = 'STRING';
 		
-		OpportunityPipelineConstants.Rows  row = new OpportunityPipelineConstants.Rows();
-		row.columnId = '1';
-		row.strict	 = false;
-		row.value	 = '123';
+		List<Smartsheet.Column> columns = new List<Smartsheet.Column>();
+		columns.add(col);
 		
-		OpportunityPipelineConstants.RowData rData = new OpportunityPipelineConstants.RowData();
-		rData.cells = new List<OpportunityPipelineConstants.Rows>{row};
+		Smartsheet.Cell cell = new Smartsheet.Cell();
+		cell.columnId = 1;
+		cell.strict	 = false;
+		cell.value	 = '123';
 		
-		OpportunityPipelineConstants.SheetContent con = new OpportunityPipelineConstants.SheetContent();
-		con.accessLevel = 'OWNER';
-		con.columns = new List<OpportunityPipelineConstants.Columns>{col};
-		con.createdAt = 'test';
-		con.id = '1';
-		con.modifiedAt = 'test';
-		con.name = 'test';
-		con.permalink = 'tet';
-		con.version = '1';
+		Smartsheet.Row row = new Smartsheet.Row();
+		List<Smartsheet.Cell> cells = new List<Smartsheet.Cell>();
+		cells.add(cell);
 		
-		OpportunityPipelineConstants.Result sRes 		= new OpportunityPipelineConstants.Result();
-		OpportunityPipelineConstants.RowWrapper sWrapper = new OpportunityPipelineConstants.RowWrapper();
-		OpportunityPipelineConstants.SmartSheet sSheet	= new OpportunityPipelineConstants.SmartSheet();
-		OpportunityPipelineConstants.ColumnsImp sCols    = new OpportunityPipelineConstants.ColumnsImp();
-		OpportunityPipelineConstants.RowsImp sRows		= new OpportunityPipelineConstants.RowsImp();
-		OpportunityPipelineConstants.SmartsheetImp sSm   = new OpportunityPipelineConstants.SmartsheetImp();
-		OpportunityPipelineConstants.CellsImp sCells 	= new OpportunityPipelineConstants.CellsImp();
+		row.cells = cells;
+		
+		List<Smartsheet.Row> rows = new List<Smartsheet.Row>();
+		rows.add(row);
+			
+		s.columns = columns;
+		s.rows = rows;
 	}
 }
